@@ -1,0 +1,140 @@
+---
+title: "Lab 02"
+author: ""
+output: html_notebook
+---
+
+## Instructions
+
+The format for this lab will mirror the majority of labs for
+this semester. I have a section here which loads in various
+libraries (if some are new, there will also be code to install
+them) and then loads a dataset of interest. Your goal is to
+predict the value of the third column (which will be missing
+on the test set) using the techniques we have learned so far.
+In this case, please restrict yourself to univariate linear
+regressions. 
+
+The lab should be written as short code snippets with surrounding
+text. The text should be in full sentences and should fully describe
+what and why you are running the code you are running.  When there
+are results, you should also give a sentence or two describing them.
+
+Make sure to include at a minimum several plots and argue for why
+you chose your final model.
+
+You may not share code with other students prior to the submission
+of each lab. However, discussing the labs amongst other students
+is allowed. Also, copying and pasting my code from class or 
+prior submissions you made is **not** considered plagiarism and
+is in fact highly encouraged. With permission, I may occasionally
+post student-solutions to past labs. These are also fair game
+for copying code from (though please do not excessively copy the
+expository text). If in doubt, please ask me before submitting
+results.
+
+## Set up
+
+Your first step should be to read in the following libraries:
+
+```{r}
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(viridis)
+```
+
+And to load the abalone dataset:
+
+```{r}
+abalone <- read_csv("https://statsmaths.github.io/ml_data/abalone.csv")
+```
+
+An abalone is a particular type of shellfish; I find it rather
+funny looking:
+
+![](https://statsmaths.github.io/stat395/assets/img/abalone.jpg)
+
+Your goal is to use physical characteristics from a set of abalone
+to predict the shellfish's age.
+
+Your code and text should go in the section below (feel free to create
+sub-sections with the `###` command at the start of line, though please
+note that this is not required):
+
+## Lab 02
+
+THIS IS WHERE YOUR CODE AND TEXT SHOULD GO (and please remove this line!)
+
+```{r}
+#Looking at what variables to use
+#First, let us check whether there is a difference in weight between male, female and i categories
+#We can see that the male and female abalone spread is relatively the same, but the i category has slightly less variance and is on average less than the other two categories.
+
+boxplot(age~sex, data=abalone)
+
+
+
+```
+```{r}
+#To test this significance, we can run the following regression
+model1 <- summary(lm(age~sex, data=abalone))
+model1
+#we can see from this model that the I category does have a statistically significant lower mean than the female and male groups to the 99.9th percentile, indicating we may want to include age as a predictor in our linear model
+  #One thing to keep in mind with a one-way anova is to check whether or not sample sizes are the same. The following code below does that and indicates the sample sizes are relatively close to each other
+
+occurences <-table(unlist(abalone))
+occurences["M"]
+occurences["F"]
+occurences["I"]
+
+```
+```{r}
+#Next we can do a simple correlation table to give us a better idea of what to include/not include in predicting age of the abalone(using only complete observations)
+  #We do this by first creating a data frame with only the variables we are interested and omitting the NA age values (only using our training data)
+
+Corr_table <- data.frame(abalone)
+Corr_table$obs_id <- NULL
+Corr_table$train_id <- NULL
+Corr_table$sex <- NULL
+
+Corr_table <- na.omit(Corr_table)
+cor(Corr_table)
+
+#From the following we can see what correlations are especially high so we can avoid a kitchen sink linear regression model
+#length and diameter are highly correlated, as are total weight and shucked weight, viscera weight and sheel weight. 
+```
+```{r}
+#Finally, we can create a stepwise regression to determine what variables to include in predicting age, keeping in mind the very high correlations of the variables above since we want to avoid multicollinearity
+
+Regression_table <- abalone
+Regression_table$obs_id <- NULL
+Regression_table$train_id <- NULL
+
+#This will allow us to reference the columns in the Regression_table with their explicit names
+#We exclude shucked, viscera and sheel weight since they are all highly correlated to total_weight
+attach(Regression_table)
+model <- step(lm(age~sex+length+diameter+height+total_weight),direction = "both")
+model
+
+summary(model)
+
+```
+```{r}
+#Finally we use the fitted values for age prediction and store the values into our a column
+abalone$age_pred <- predict(model, Regression_table)
+```
+## Submission
+
+The code below assumes that you have adding a prediction named
+`age_pred` to every row of the `abalone` dataset. 
+
+```{r}
+#We then store this column as well as the observation id's into an excel file
+submit <- data.frame(abalone$obs_id, abalone$age_pred)
+colnames(submit) <- c("obs_id", "age_pred")
+write_csv(submit, "class02_submit.csv")
+```
+
+Now, upload this file (ends with ".Rmd"), the HTML output
+(ends with ".nb.html"), and the csv file to GitHub.

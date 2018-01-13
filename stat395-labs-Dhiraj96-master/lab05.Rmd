@@ -1,0 +1,102 @@
+The format of this lab follows the same format as the previous
+ones. Your goal is to predict the value of the third column
+(which will be missing on the test set) using the techniques
+we have learned so far.
+
+# Set up
+
+Read in the following libraries and to load the House Price dataset:
+
+```{r}
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(viridis)
+
+ca <- read_csv("https://statsmaths.github.io/ml_data/ca_house_price.csv")
+```
+
+Notice that the test set here is not a random subset of the data but
+has very different properties that than the other variables.
+
+# Lab 05
+
+```{r}
+#We start with the a polynomial basis transformation of the longitude and latitude data in our ca dataset as discussed in class. Since the data is heavily positively skewed towards larger cities such as los angeles and san-francisco, it makes sense to use a non-linear interaction in creating out first model. We can see this in map from the lab below. 
+
+model1 <- lm(median_house_value ~
+               poly(latitude, longitude,
+                    degree = 6),
+            subset = train_id == "train",
+            data = ca)
+ca$value_pred <- predict(model1, newdata = ca)
+sqrt(tapply((ca$median_house_value - ca$value_pred)^2, ca$train_id, mean))
+library(ggmap)
+qmplot(longitude, latitude, data = ca,
+       color = ca$value_pred, size = I(0.5)) +
+  scale_color_viridis()
+
+```
+
+
+```{r}
+# The data I looked at next was the rest of the variables. Since total units and vacant units had a high correlation, I used just vacant units as it proved to have more significance as well as led to a lower validation RMSE of the test set. Mean and median household income also had a very high correlation and after testing various additive models as well as interactive models, I determined that a polynomial basis transformation of the interaction of these two variables fit the data the best. 
+
+model2 <- lm(median_house_value ~
+               poly(latitude, longitude,
+                      degree = 8) + median_household_income + mean_household_income + vacant_units + renters,
+             subset = train_id == "train",
+            data = ca)
+ca$value_pred <- predict(model2, newdata = ca)
+sqrt(tapply((ca$median_house_value - ca$value_pred)^2, ca$train_id, mean))
+
+#We see that just this additive model has significantly reduced our RMSE
+
+```
+
+```{r}
+#Next we look at the built date variables in our model. I first tried out an additive model with all the variables and that led to a lower validation set RMSE. 
+
+model3 <- lm(median_house_value ~ built_2005_or_later + built_2000_to_2004 + built_1990s + built_1980s + built_1970s + built_1950s + built_1940s + poly(latitude, longitude, degree=8) + median_household_income + mean_household_income + vacant_units + renters, subset = train_id == "train", data=ca)
+ca$value_pred <- predict(model3, newdata = ca)
+sqrt(tapply((ca$median_house_value - ca$value_pred)^2, ca$train_id, mean))
+
+```
+```{r}
+#Next I decided to try using a polynomial basis transformation for two of the most significant built dates as well as median and mean household income. I also removed certain built dates since they proved to lower the RMSE. The resulting model is below:
+
+model4 <- lm(median_house_value ~  poly(latitude, longitude, degree=8) + poly(median_household_income, mean_household_income, degree = 5) + poly(built_2005_or_later, built_1939_or_earlier, degree = 2) + built_1940s + built_1950s + built_1960s + renters, subset = train_id == "train", data=ca)
+ca$value_pred <- predict(model4, newdata = ca)
+sqrt(tapply((ca$median_house_value - ca$value_pred)^2, ca$train_id, mean))
+
+```
+```{r}
+#Next, I looked at the mean household size renters and owners to see if an additive or polynomial model would better fit the data. I found that the validation set RMSE was improved slightly when adding an polynomial interactive term between these two variables. 
+
+model5 <- lm(median_house_value ~  poly(latitude, longitude, degree=8) + poly(median_household_income, mean_household_income, degree = 4) + poly(built_2005_or_later, built_1939_or_earlier, degree = 2) + built_1940s + built_1950s + built_1960s + renters +  poly(mean_household_size_owners,mean_household_size_renters, degree = 4), subset = train_id == "train", data=ca)
+ca$price_pred <- predict(model5, newdata = ca)
+sqrt(tapply((ca$median_house_value - ca$price_pred)^2, ca$train_id, mean))
+
+```
+```{r}
+#Some other variables I tried to include were density of units & vacant units but these reduced my total model RMSE and hence I decided to leave them out. After playing around with the degree of the polynomial factors I used, I found this resulting model to have the lowest training as well as validation set RMSE. Finally, I decided to replace all the values below zero to zero. This slightly improved my validation set RMSE. 
+
+ca$price_pred[ca$price_pred < 0] <- 0  
+sqrt(tapply((ca$median_house_value - ca$price_pred)^2, ca$train_id, mean))
+
+
+```
+
+# Submission
+
+The code below assumes that you have added a prediction named
+`price_pred` to every row of the dataset.
+
+```{r}
+submit <- select(ca, obs_id, price_pred)
+write_csv(submit, "class05_submit.csv")
+```
+
+Now, upload this file (ends with ".Rmd"), the HTML output
+(ends with ".nb.html" or ".html"), and the csv file to
+GitHub.

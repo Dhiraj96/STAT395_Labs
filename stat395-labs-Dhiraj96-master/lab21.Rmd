@@ -1,0 +1,115 @@
+The format of this lab follows the same format as the previous
+ones. Your goal is to predict the value of the third column
+(which will be missing on the test set) using the techniques
+we have learned so far.
+
+# Set-up
+
+Read in the following libraries and to load the metadata:
+
+```{r}
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(viridis)
+library(stringi)
+library(keras)
+
+
+stl <- read_csv("https://statsmaths.github.io/ml_data/stl_10.csv")
+```
+
+To get the embeddings, download this file as well:
+
+```{r}
+X <- as.matrix(read_csv("https://statsmaths.github.io/ml_data/stl_10_vgg16_cnn.csv"))
+```
+
+If you would like the raw image data as well, you can download
+that here (you do not need to use these, but are welcome to make
+use of the raw images for things such as finding negative examples):
+
+- https://drive.google.com/open?id=0B6_9OUDRaPQsaHJhZzVvWW5IdWs
+
+Once these are downloaded, you'll have to run something like this:
+
+```{r}
+x96 <- read_rds("~/Desktop/stl_10_x96.rds")
+```
+
+If, for example, the file sits on your Desktop and you have a Mac. If you have
+trouble with any of this, please let me know as soon as possible.
+
+
+# Lab 21
+
+
+After loading in the data and the weights, we can begin by constructing the datasets required for our dense neural network.
+```{r}
+stl$class <- stl$class - 1
+y <- stl$class
+
+X_train <- X[stl$train_id == "train",]
+y_train <- to_categorical(y[stl$train_id == "train"], num_classes = 10)
+
+
+```
+
+
+Next, we start with a basic neural network model with two hidden layers. It seems as though two hidden layer provided the best accuracy rates. I also decided to decrease the droupout rate since the model likely has alot of noise, it slightly improved my validation rate as well. I also decided to decrease my learning rate and increase the epochs to improve the range of convergence. 
+  
+```{r}
+model <- keras_model_sequential()
+model %>%
+  layer_dense(units = 64, input_shape = ncol(X_train)) %>%
+  layer_activation(activation = "relu") %>%
+  layer_dropout(rate = 0.12) %>%
+  
+  layer_dense(units = 64, input_shape = ncol(X_train)) %>%
+  layer_activation(activation = "relu") %>%
+  layer_dropout(rate = 0.12) %>%
+  
+  layer_dense(units = 10) %>%
+  layer_activation(activation = "softmax")
+
+model %>% compile(loss = 'categorical_crossentropy',
+                  optimizer = optimizer_rmsprop(lr = 0.001),
+                  metrics = c('accuracy'))
+
+history <- model %>%
+    fit(X_train, y_train, epochs = 75)
+plot(history)
+
+
+```
+
+
+Taking a closer look at our validation rate, we see that, it does a pretty good job overall. 
+```{r}
+y_pred <- predict_classes(model, X)
+
+stl$class <- stl$class + 1
+y_pred <- y_pred + 1
+
+tapply(stl$class == y_pred, stl$train_id, mean)
+table(x = stl$class, y = y_pred)
+
+```
+
+
+
+
+# Submission
+
+The code below assumes that you have added a prediction named
+`class_pred` to every row of the dataset.
+
+```{r}
+stl$class_pred <- y_pred
+submit <- select(stl, obs_id, class_pred)
+write_csv(submit, "class21_submit.csv")
+```
+
+Now, upload this file (ends with ".Rmd"), the HTML output
+(ends with ".nb.html" or ".html"), and the csv file to
+GitHub.

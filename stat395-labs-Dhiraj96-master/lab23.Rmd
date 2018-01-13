@@ -1,0 +1,95 @@
+The format of this lab follows the same format as the previous
+ones. Your goal is to predict the value of the third column
+(which will be missing on the test set) using the techniques
+we have learned so far.
+
+# Set-up
+
+Read in the following libraries and to load the metadata:
+
+```{r}
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(viridis)
+library(stringi)
+library(tokenizers)
+library(smodels)
+library(keras)
+library(Matrix)
+library(methods)
+
+amazon <- read_csv("https://statsmaths.github.io/ml_data/amazon_product_stars.csv")
+```
+
+
+# Lab 23
+
+Let us start by first constructing the data sets we will pass into our LSTM RNN model. 
+```{r}
+words <- tokenize_words(amazon$text)
+vocab <- top_n(count(data_frame(word = unlist(words)), word), n=5000)$word
+
+id <- lapply(words, function(v) match(v, vocab))
+id <- lapply(id, function(v) v[!is.na(v)])
+X <- pad_sequences(id, maxlen = 100)
+y <- amazon$positive
+
+X_train <- X[amazon$train_id == "train",]
+X_valid <- X[amazon$train_id == "valid",]
+y_train <- to_categorical(y[amazon$train_id == "train"], num_classes = 2)
+y_valid <- to_categorical(y[amazon$train_id == "valid"], num_classes = 2)
+
+```
+
+Next, lets build the model. I found that the lstm layer would require a lower number of units to generate a more stable valid state. I also played around with the dropout rates but 0.2 seemed to provide the most stability and best valid rates so I stuck with this model. I also only used a few epochs since my validation rate would decay quite substantially after 5 or more epochs. I also decided to reduce my recurrent dropout due to noise, this also helped reduce the degree of overfitting. 
+```{r}
+model <- keras_model_sequential()
+model %>%
+  layer_embedding(input_dim = length(vocab) + 1,
+                  output_dim = 128,
+                  input_length = ncol(X)) %>%
+  
+  layer_lstm(units = 32,
+             dropout = 0.2,
+             recurrent_dropout = 0.1,
+             return_sequences = FALSE) %>%
+  layer_dense(units = 2, activation = 'softmax')
+
+model %>% compile(loss = 'binary_crossentropy',
+                  optimizer = 'adam',
+                  metrics = c('accuracy'))
+
+history <- model %>% fit(X_train, y_train,
+                         
+                         epochs = 3,
+                         validation_data = list(X_valid, y_valid))
+
+plot(history)
+
+```
+
+Below we see our prediction results. 
+```{r}
+ y_pred <- predict_classes(model, X)
+tapply(y_pred == amazon$positive, amazon$train_id, mean)
+
+
+
+```
+
+
+# Submission
+
+The code below assumes that you have added a prediction named
+`class_pred` to every row of the dataset.
+
+```{r}
+amazon$class_pred <- y_pred
+submit <- select(amazon, obs_id, class_pred)
+write_csv(submit, "class23_submit.csv")
+```
+
+Now, upload this file (ends with ".Rmd"), the HTML output
+(ends with ".nb.html" or ".html"), and the csv file to
+GitHub.

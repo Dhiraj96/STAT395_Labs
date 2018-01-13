@@ -1,0 +1,98 @@
+The format of this lab follows the same format as the previous
+ones. Your goal is to predict the value of the third column
+(which will be missing on the test set) using the techniques
+we have learned so far.
+
+For this lab, please only use neural networks.
+
+# Set up
+
+Read in the following libraries and to load the crimes dataset:
+
+```{r}
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(viridis)
+library(keras)
+
+crimes <- read_csv("https://statsmaths.github.io/ml_data/chi_crimes_12.csv")
+```
+
+The names of the crimes are, in order:
+
+```{r}
+crimes_list <- c("theft", "battery", "criminal damage", "narcotics",
+"other offense", "assault", "burglary", "motor vehicle theft", "robbery",
+"deceptive practice", "criminal trespass", "prostitution")
+```
+
+Make sure your predictions are all an integer from 1 to 12.
+
+# Lab 11
+
+Setting up matrices to store our data
+```{r}
+X <- scale(as.matrix(select(crimes, latitude, longitude, hour)))
+X_train <- X[crimes$train_id == "train",]
+X_valid <- X[crimes$train_id == "valid",]
+
+y <- crimes$crime_type - 1
+y_train <- to_categorical(y[crimes$train_id == "train"], num_classes = 12)
+y_valid <- to_categorical(y[crimes$train_id == "valid"], num_classes = 12)
+
+```
+
+
+I found that increasing the layers found to significantly improve our validation accuracy. At risk of overfitting, i decided not to go over 64 layers. 
+```{r}
+model1 <- keras_model_sequential()
+model1 %>%
+  layer_dense(units = 64, input_shape = c(3)) %>%
+  layer_activation(activation = "relu") %>%
+  layer_dense(units = 64) %>%
+  layer_activation(activation = "relu") %>%
+  layer_dense(units = 12) %>%
+  layer_activation(activation = "softmax")
+model1
+
+```
+
+Compiling and fitting the model, plotting how accuracy and loss as each epoch progresses. Some observations include:
+  -As I increase my learning rate, I need a fewer number of epochs but the validation predictions tend not to be as good if my learning rate is too high. Therefore, in the interest of time, I found that the learning rate and epochs below resulted in a good tradeoff between the two. 
+  -Another thing I played around with was the optimizer functions: I found that adagrad and rmsprop tended to do better with the data. 
+```{r}
+model1 %>% compile(loss = 'categorical_crossentropy',
+                  optimizer = optimizer_adagrad(lr=0.01),
+                  metrics = c('accuracy'))
+
+history <- model1 %>% fit(
+  X_train, y_train, 
+  epochs = 10,
+  validation_data = list(X_valid, y_valid)
+)
+
+plot(history)
+
+```
+
+Finally, I save my predicted values 
+```{r}
+crimes$crime_type_pred <- predict_classes(model1, x = X) + 1
+```
+
+
+
+# Submission
+
+The code below assumes that you have added a prediction named
+`crime_type_pred` to every row of the dataset.
+
+```{r}
+submit <- select(crimes, obs_id, crime_type_pred)
+write_csv(submit, "class11_submit.csv")
+```
+
+Now, upload this file (ends with ".Rmd"), the HTML output
+(ends with ".nb.html" or ".html"), and the csv file to
+GitHub.

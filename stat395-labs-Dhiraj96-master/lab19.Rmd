@@ -1,0 +1,132 @@
+The format of this lab follows the same format as the previous
+ones. Your goal is to predict the value of the third column
+(which will be missing on the test set) using the techniques
+we have learned so far.
+
+# Set-up
+
+Read in the following libraries and to load the metadata:
+
+```{r}
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(viridis)
+library(stringi)
+library(methods)
+library(keras)
+
+fashion <- read_csv("https://statsmaths.github.io/ml_data/fashion_10.csv")
+```
+
+To get the actual data for the images, you'll have to download the following
+file.
+
+- https://drive.google.com/open?id=0B6_9OUDRaPQsTFU5SWpNZG1tbTg
+
+Once these are downloaded, you'll have to run something like this:
+
+```{r}
+x28 <- read_rds("~/Desktop/fashion_10_x28.rds")
+```
+
+If, for example, the file sits on your Desktop and you have a Mac. If you have
+trouble with any of this, please let me know as soon as possible.
+
+
+# Lab 19
+Before we dig in, let us take a closer look at the categories and some example pictures. 
+
+```{r}
+table(y=fashion$class_name, x=fashion$class)
+
+
+par(mar = c(0,0,0,0))
+par(mfrow = c(6, 10))
+for (i in sample(which(fashion$class == 5), 60)) {
+  plot(0,0,xlim=c(0,1),ylim=c(0,1),axes= FALSE,type = "n")
+  rasterImage(x28[i,,,],0,0,1,1)
+}
+
+dim(x28)
+```
+
+Lets create a dataframe for our data. 
+```{r}
+X <- t(apply(x28, 1, cbind))
+X_train <- X[fashion$train_id == "train",]
+
+y <- fashion$class
+y_train <- to_categorical(y[fashion$train_id == "train"], num_classes = 10)
+
+```
+
+
+This block of code will have the final neural network I use for my model. Some of the things I experimented on include:
+  - No. of layers: I found that more layers didnt significantly improve my   model so I opted for just 2. 
+  - dropout rate: I reduced my dropout rate since there seemed to be alot    of noise in the predictions. 0.15 seemed to be a good tradeoff for the     validation rate.
+  - learning rate: I decreased the learning rate and increased the epochs    to reach convergence. 
+```{r}
+model <- keras_model_sequential()
+model %>%
+  
+    layer_dense(units = 128, kernel_initializer = "glorot_normal",
+                input_shape = c(28^2)) %>%
+    layer_activation(activation = "relu") %>%
+    layer_dropout(rate = 0.15) %>%
+
+    layer_dense(units = 128, kernel_initializer = "glorot_normal") %>%
+    layer_activation(activation = "relu") %>%
+    layer_dropout(rate = 0.15) %>%
+  
+    layer_dense(units = 128, kernel_initializer = "glorot_normal") %>%
+    layer_activation(activation = "relu") %>%
+    layer_dropout(rate = 0.15) %>%
+  
+    layer_dense(units = 10) %>%
+    layer_activation(activation = "softmax")
+
+
+model%>% compile(loss = 'categorical_crossentropy',
+                 optimizer = optimizer_sgd(lr = 0.001, momentum = 0.9,
+                                           nesterov = TRUE),
+                 metrics = c('accuracy'))
+
+model
+
+
+history <- model %>%
+  fit(X_train, y_train, epochs = 100, validation_split = 0.2,
+      batch_size = 128)
+
+plot(history)
+
+```
+
+Looking at how the model does on the real validation set, we see that many of the missclassifcations occur for clothes that look very similar. 
+From the confusion matrix, we see the main issues are confusing tshirts from shirts, confusing pullovers for coats, confusing shirts for tshirts, pullovers and coats. 
+```{r}
+fashion$class_pred <- predict_classes(model, X)
+tapply(y == fashion$class_pred, fashion$train_id, mean)
+
+fnames <- fashion$class_name[match(0:9, fashion$class)]
+fnames <- factor(fnames, levels = fnames)
+
+table(pred = fnames[fashion$class_pred + 1],
+      y = y)
+```
+
+
+# Submission
+
+The code below assumes that you have added a prediction named
+`class_pred` to every row of the dataset.
+
+```{r}
+submit <- select(fashion, obs_id, class_pred)
+write_csv(submit, "class19_submit.csv")
+```
+
+Now, upload this file (ends with ".Rmd"), the HTML output
+(ends with ".nb.html" or ".html"), and the csv file to
+GitHub.

@@ -1,0 +1,115 @@
+The format of this lab follows the same format as the previous
+ones. Your goal is to predict the value of the third column
+(which will be missing on the test set) using the techniques
+we have learned so far.
+
+# Set-up
+
+Read in the following libraries and to load the metadata:
+
+```{r}
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(viridis)
+library(stringi)
+library(tokenizers)
+library(smodels)
+library(keras)
+library(Matrix)
+library(methods)
+
+imdb <- read_csv("https://statsmaths.github.io/ml_data/imdb.csv")
+```
+
+
+# Lab 22
+
+First, lets figure out what words we are going to put into our model. We use the tokenizer function to include the most frequently used ...  words in our model. Then, we create numeric indices, not including words not in our vocabulary. Finally, we use the pad_sequences function to scale the review lengths with the default parameters.
+```{r}
+words <- tokenize_words(imdb$text)
+vocab <- top_n(count(data_frame(word=unlist(words)), word), n=5000)$word
+
+id <- lapply(words, function(v) match(v, vocab))
+id <- lapply(id, function(v) v[!is.na(v)])
+
+X <- pad_sequences(id, maxlen = 100)
+
+```
+
+We then construct our training data sets.
+```{r}
+y <- imdb$class
+
+X_train <- X[imdb$train_id == "train",]
+y_train <- to_categorical(y[imdb$train_id == "train"], num_classes = 2)
+
+```
+
+
+Finally, I display the final model I used in the block of code below. I also list out the changes I made along the way and potential reasons for those changes. 
+  - Most importantly, I reduced my learning rate as it significantly reduced the amount my     training and validation set accuracy difference (decreased overfitting substantially).  
+  - Reducing the dropout rate made a few % difference in my final model.
+  - Reducing the pooling size slightly helped improve my accuracy as well
+  - I also decided to increase the number of total filters in my convolutional layer 
+
+```{r}
+model <- keras_model_sequential()
+model %>%
+    layer_embedding(
+      input_dim = length(vocab) + 1,
+      output_dim = 50,
+      input_length = ncol(X)
+    ) %>%
+  
+    layer_conv_1d(filters = 64, kernel_size = c(4)) %>%
+    layer_max_pooling_1d(pool_size = 4L) %>%
+    layer_dropout(rate = 0.12) %>%
+  
+    layer_flatten() %>%
+    layer_dense(128) %>%
+    layer_activation("relu") %>%
+    layer_dropout(rate = 0.12) %>%
+  
+    layer_dense(ncol(y_train)) %>%
+    layer_activation("softmax")
+
+model %>% compile(
+  loss = "binary_crossentropy",
+  optimizer = optimizer_rmsprop(lr = 0.00005),
+  metrics = "accuracy"
+  
+)
+
+history <- model %>% fit(X_train, y_train, batch_size = 32,
+                         epochs = 10,
+                         validation_split = 0.1)
+plot(history)
+
+
+```
+
+Finally, we take a look at how well the training and validations sets did
+```{r}
+y_pred <- predict_classes(model, X)
+tapply(y_pred == imdb$class, imdb$train_id, mean)
+
+```
+
+
+
+
+# Submission
+
+The code below assumes that you have added a prediction named
+`class_pred` to every row of the dataset.
+
+```{r}
+imdb$class_pred <- y_pred
+submit <- select(imdb, obs_id, class_pred)
+write_csv(submit, "class22_submit.csv")
+```
+
+Now, upload this file (ends with ".Rmd"), the HTML output
+(ends with ".nb.html" or ".html"), and the csv file to
+GitHub.

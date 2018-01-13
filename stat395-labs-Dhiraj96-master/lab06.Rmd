@@ -1,0 +1,139 @@
+The format of this lab follows the same format as the previous
+ones. Your goal is to predict the value of the third column
+(which will be missing on the test set) using the techniques
+we have learned so far.
+
+*Additionally*: For this lab, fit at least one model using the
+matrix formulation we saw today with `lm.fit`. I also encourage
+you to figure out a way to use the latitude and longitude
+variables, though this is not a requirement.
+
+# Set up
+
+Read in the following libraries and to load the diamonds dataset:
+
+```{r}
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(viridis)
+
+housing <- read_csv("https://statsmaths.github.io/ml_data/ca_pa_house_price.csv")
+```
+
+Notice that the test set here is not a random subset of the data but
+has very different properties that than the other variables.
+
+# Lab 06
+
+```{r}
+library(ggmap)
+library(gam)
+
+#We can first plot the latitude and longitudinal data based on the test, validation and training sets. We set the color based on what portion of data we are looking at. We see that our test set is pennsylvania, our validation set is north california and our training data set is south california. 
+
+attach(housing)
+qmplot(longitude, latitude, data=housing, size = I(0.5), color=train_id) 
+
+```
+
+```{r}
+#First we try to include some variables (other than longitude and latitude) that I think will intuitively make sense to include in our model. I ran code to show the means of the variables that are different enough in the test(pennsylvania) vs. our train and valid set (california) that there would be enough variation to capture.
+
+housing$vacant_unit_percentage <- housing$vacant_units / housing$total_units
+
+tapply(housing$population, housing$train_id, mean)
+tapply(housing$vacant_unit_percentage, housing$train_id, mean)
+tapply(housing$median_rooms, housing$train_id, mean)
+tapply(housing$built_2005_or_later, housing$train_id, mean)
+tapply(housing$built_1939_or_earlier, housing$train_id, mean)
+tapply(housing$bedrooms_0, housing$train_id, mean)
+tapply(housing$bedrooms_5_or_more, housing$train_id, mean)
+tapply(housing$renters, housing$train_id, mean)
+
+
+
+```
+```{r}
+#Next, we attempt to construct a model using matrices and the lm.fit function of the above variables
+y <- housing$median_house_value
+
+X <- as.matrix(select(housing, population, vacant_unit_percentage, median_rooms, built_2005_or_later, built_1939_or_earlier, bedrooms_0, bedrooms_5_or_more, renters))
+X <- cbind(1, X) #for adding a column of ones for our intercept
+
+#creates specific training and validation sets for our response variable and matrix variables
+X_train <- X[housing$train_id == "train", ]
+X_valid <- X[housing$train_id == "valid", ]
+y_train <- y[housing$train_id == "train"]
+y_valid <- y[housing$train_id == "valid"]
+
+#The following code fits our training data and uses the betas to create a column of predicted values (model_test). 
+beta <- lm.fit(X_train, y_train)$coef
+housing$model_test <- X %*% beta
+
+sqrt(tapply((housing$median_house_value - housing$model_test)^2, housing$train_id, mean))
+
+```
+
+
+```{r}
+#Next, I plot the predicted prices for all the train_id data, only the test data and the predicted data on a map. We see that the basic linear model does a relatively good job estimating our test training data. We especially see this on the map since it has higher prices as we move inwards to the cities of pittsburgh and philadelphia. 
+
+qplot(model_test, data=housing, color = train_id)
+qplot(model_test, data=housing[housing$train_id == "test",], color = train_id)
+qmplot(longitude, latitude, data = housing[housing$train_id == "test",], color = model_test) +
+  scale_color_viridis()
+
+```
+
+```{r}
+
+#I decided to use the gam function for the second model as well as the smoothing function that is provided. This improves our general RMSE for the train and validation sets.
+model_1 <- gam(median_house_value ~ s(population) + s(vacant_unit_percentage) + s(median_rooms) + s(built_2005_or_later) + s(built_1939_or_earlier) + s(bedrooms_0) + s(bedrooms_5_or_more) + renters, subset = train_id == "train", data=housing)
+summary(model_1)
+housing$model_1_pred <- predict(model_1, newdata=housing) 
+
+
+```
+
+```{r}
+#The model produces a better RMSE for the train and valid set vs. our matrix fit model. 
+sqrt(tapply((housing$median_house_value - housing$model_1_pred)^2, housing$train_id, mean))
+
+#I also graphed a plot of our predicted prices vs. given prices to get a better idea of the distribution. We see that the range of values vary between just under 200,000 to just over 800,000 which seems reasonable our actual data ranges from 16,000 to 1,000,000.
+qplot(median_house_value, model_1_pred, data=housing, color = train_id)
+
+```
+
+```{r}
+#Below are a few plots i made of our predicted prices. The first plot shows the distribution of the predicted house prices and color codes them according to their respective train_ids. The next shows just the distribution of our test predicted prices and the third shows the scale of prices on a map. We see that our model does a reasonable job skewing up our estimates near big cities. It also does a reasonable job estimating prices in our test set (pennsylvania) where we see the median price is centered under 500,000 which does seem slightly higher than we would like it to be. 
+
+qplot(model_1_pred, data=housing, color = train_id)
+qplot(model_1_pred, data=housing[housing$train_id == "test",], color = train_id)
+qmplot(longitude, latitude, data = housing[housing$train_id == "test",], color = model_1_pred) +
+  scale_color_viridis()
+
+```
+```{r}
+#Finally, I compare the summary statistics of each of the predicted test data to see which one to use. Since for the test set I would expect pennsylvania prices to be lower on average, I decided to use the first linear matrix model as my final model despite it having a higher RMSE for both training and validation data sets. 
+
+summary(housing$model_test[housing$train_id == "test"])
+summary(housing$model_1_pred[housing$train_id == "test"])
+
+
+```
+
+# Submission
+
+The code below assumes that you have added a prediction named
+`price_pred` to every row of the dataset.
+
+```{r}
+housing$price_pred <- housing$model_test
+submit <- select(housing, obs_id, price_pred)
+write_csv(submit, "class06_submit.csv")
+```
+
+Now, upload this file (ends with ".Rmd"), the HTML output
+(ends with ".nb.html" or ".html"), and the csv file to
+GitHub.

@@ -1,0 +1,139 @@
+*The format of this lab follows the same format as the previous
+ones. Your goal is to predict the value of the third column
+(which will be missing on the test set) using the techniques
+we have learned so far. In this case, please restrict yourself
+to multivariate linear regressions.*
+
+# Set up
+
+Read in the following libraries and to load the diamonds dataset:
+
+```{r}
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(viridis)
+
+diamonds <- read_csv("https://statsmaths.github.io/ml_data/diamonds.csv")
+```
+
+The dataset gives characteristics of various types of diamonds.
+Your goal is to use these to estimate the price of each diamond.
+
+# Lab 04
+
+```{r}
+#We can first construct a few graphs and correlation tables of the continuous variables in the data. 
+
+install.packages("GGally",repos = "http://cran.us.r-project.org")
+library(GGally)
+attach(diamonds) 
+
+diamonds_plots <- data.frame(price, carat, depth, table, diamonds$x, diamonds$y, diamonds$z)
+ggpairs(diamonds_plots)
+
+#We can see that price has a potential polynomial relationship with carat, x (length in mm) and y (width in mm). This may mean that a polynomial regression is appropriate if we decide to choose these variables in our regression. 
+#We also notice that depth and table have almost randomly scattered plots which may indicate that they may not be very good predictor variables to use in our final model. 
+  #Since we cannot see how the variable x (depth in mm) is related to price clearly, I have chosen to plot this seperately and from the plot we see that it has a very exponential relationship, which may warrant taking the log of depth. 
+
+qplot(diamonds$z, price, data=diamonds)
+```
+
+```{r}
+#Next, let us plot a few of these continuous variables in within cut of diamonds and color of diamonds
+
+qplot(carat, price, data=diamonds, color = cut, size = I(3))
+qplot(carat, price, data=diamonds, color = color, size = I(3))
+qplot(carat, price, data=diamonds, color = clarity, size = I(3))
+
+#One thing to note is that both color and cut seem to be distributed the same way when graphed againstprice and carat. There seems to be an indication of a non-linear fit which may require us transforming some of our dependent variables as I pointed out above. 
+  #Clarity however seems to exhibit some patterns, with the VVS and VS superior colors having on average higher prices for the same respective carat. 
+  #Another thing to note is that carat plays a much bigger role in determining price vs. any of the categorical variables which may       indicate us not needing to place them in our model 
+
+
+```
+
+```{r}
+#We can first start with a basic kitchen sink model that does not contain any transformations of our independent variables 
+model1 <- lm(price ~ carat + factor(cut) + factor(color) + factor(clarity) + depth + table + diamonds$x + diamonds$y + diamonds$z, subset = train_id == "train")
+summary(model1)
+model1_pred <- predict(model1, newdata = diamonds)
+
+#In the model we see that table and several colors and cuts are not statistically significant (as we predicted above). Another thing to note is that clarity is statistically significant.
+
+```
+
+```{r}
+#Let us remove some of these variable to arrive at a regression that may potentially more accurately capture our data. I have decided to remove the cut, color, depth and table variables since they are not or only slightly statistically significant.
+
+model2 <- lm(price ~ carat + factor(clarity) + diamonds$z, subset = train_id == "train")
+summary(model2)
+model2_pred <- predict(model2, newdata = diamonds)
+
+#Now we see that x and y seem not to be statistically significant. So I have also decided to remove x and y, which leads to a simialr R squared value and a much higher f-statistic (597 vs. 487.2 with x and y included and 319.6 with all variables included)
+#Although we have a reduced R-squared, it is natural to see this since we have removed variables. To see the true improvement in the whole model, we can compare the F-statistic of each model. Our second model seems to have a much higher F-statistic indicating that the model as a whole (vs. the t-statistics that only measure one coefficient at a time) is improved. 
+```
+
+```{r}
+#Next, we can start transforming the variables. We first add a polynomial term to the carat regressor and see how that affects our F-statistic and also add a logarithmic transformation to our depth column.
+
+model3 <- lm(price ~ poly(carat,3) + factor(clarity) + log(diamonds$z), subset = train_id == "train")
+summary(model3)
+model3_pred <- predict(model3, newdata = diamonds)
+
+#We see that our second polynomial term is not significant at all, leading to a lower F-statistic value. This may indicate that our second model is the best one we have. 
+
+
+```
+```{r}
+#Finally, we can remove the polynomial term of carat but include the logarithmic term for the depth of diamonds. Our result model is as follows
+model4 <- lm(price ~ carat + factor(clarity) + log(diamonds$z), subset = train_id == "train")
+summary(model4)
+model4_pred <- predict(model4, newdata = diamonds)
+
+#This model has the highest R^2, and f-statistic out of the models we have checked so far which leads us to believe that this may fit the data the best. Whether it fits the validation set the best will be seen next. 
+```
+
+
+```{r}
+#Finally, we can compare the RMSE of all three models and choose our model based on the results.
+
+sqrt(tapply((price - model1_pred)^2, diamonds$train_id, mean))
+sqrt(tapply((price - model2_pred)^2, diamonds$train_id, mean))
+sqrt(tapply((price - model3_pred)^2, diamonds$train_id, mean))
+sqrt(tapply((price - model4_pred)^2, diamonds$train_id, mean))
+
+
+
+#We see that the model with the highest F-statistic is also the model that performs the best on the validation data. It is interesting to note that although the 3rd model does not have the highest f-statistic and also contains a regressor that is not significant (the second degree in the 3rd degree polynomial for carat), it produces the lowest RMSE on both the training and validation data set. The 4th model has the highest f-statistic but does not perform as well on the validation data set. This leads me to choose the 3rd model as my final model. 
+
+#One more thing we can do is strip the negative predictions from each of our models since there are no prices below zero. We do this by replacing all negatively valued predictions with zero and re-analyzing the RMSE of each model. This significantly reduces the RMSE of all models. 
+
+model1_pred[model1_pred < 0] <- 0  
+model2_pred[model2_pred < 0] <- 0  
+model3_pred[model3_pred < 0] <- 0  
+model4_pred[model4_pred < 0] <- 0  
+
+sqrt(tapply((price - model1_pred)^2, diamonds$train_id, mean))
+sqrt(tapply((price - model2_pred)^2, diamonds$train_id, mean))
+sqrt(tapply((price - model3_pred)^2, diamonds$train_id, mean))
+sqrt(tapply((price - model4_pred)^2, diamonds$train_id, mean))
+
+
+  #What is quite interesting is that our kitchen sink model performs the best for our validation data set, as opposed to transforming the variables or not including the variables that are not significant. This could be a result from the sampling of our data and as such, I have decided to opt for the the fourth model as my final model as I believe that will perform the best out of sample. 
+```
+
+# Submission
+
+The code below assumes that you have added a prediction named
+`price_pred` to every row of the dataset.
+
+```{r}
+diamonds$price_pred <- model4_pred
+submit <- select(diamonds, obs_id, price_pred)
+write_csv(submit, "class04_submit.csv")
+```
+
+Now, upload this file (ends with ".Rmd"), the HTML output
+(ends with ".nb.html" or ".html"), and the csv file to
+GitHub.

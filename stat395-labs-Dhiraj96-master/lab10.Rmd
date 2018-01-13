@@ -1,0 +1,114 @@
+The format of this lab follows the same format as the previous
+ones. Your goal is to predict the value of the third column
+(which will be missing on the test set) using the techniques
+we have learned so far.
+  -
+
+# Set up
+
+Read in the following libraries and to load the dataset:
+
+```{r}
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(viridis)
+library(xgboost)
+library(randomForest)
+library(glmnet)
+library(FNN)
+
+flights <- read_csv("https://statsmaths.github.io/ml_data/flights.csv")
+```
+
+
+# Lab 10
+
+
+
+I first start with an exploration of the data using random forests. After playing around with a few combinations, I found that arrival and departure hour worked best among the factors we had. Month, day, weekday did not seem to be very predictive and since the number of categories for origin and destination exceeded the maximum allowed by random forests (in the interest of computation time), I have decided to handle these variables seperately. 
+```{r}
+
+model1 <- randomForest(factor(delayed) ~ arr_hour + dep_hour, data=flights, subset = train_id == "train", ntree = 1000, maxnodes = 3, mtry = 1)
+
+flights$model1_pred <- predict(model1, newdata=flights)
+
+tapply(flights$model1_pred == flights$delayed, flights$train_id, mean)
+
+importance(model1)
+```
+
+
+
+Since we cannot use random forests to handle origin and destination cities, I will attempt to use KNN since it seems as though they may be important variables. Since they have a couple hundred different categories, a KNN classification shows itself to be appropriate. We then tune the knn to find the one that maximizes our valid classification rate
+```{r}
+
+flights$origin_numeric <- as.numeric(as.factor(flights$origin))
+flights$dest_numeric <- as.numeric(as.factor(flights$dest))
+
+X1 <- as.matrix(select(flights, origin_numeric, dest_numeric))
+y1 <- flights$delayed
+
+X1_train <- X1[flights$train_id == "train",]
+X1_valid <- X1[flights$train_id == "valid",]
+y1_train <- y1[flights$train_id == "train"]
+y1_valid <- y1[flights$train_id == "valid"]
+
+
+flights$model2_pred <- knn(train = X1_train, test = X1, cl = y1_train, k = 6)
+tapply(flights$model2_pred == flights$delayed, flights$train_id, mean)
+
+
+```
+
+Finally, I attempt to combine both these predictions in a gradient boosted tree to see if this helps with improving our current classification rate. After tuning some of the parameters and playing around with a few options, it seems as though getting a higher validation set than using KNN above is difficult.
+```{r}
+flights$model1_pred <- as.numeric(flights$model1_pred)
+flights$model1_pred[flights$model1_pred == 1] <- 0
+flights$model1_pred[flights$model1_pred == 2] <- 1
+
+flights$model2_pred <- as.numeric(flights$model2_pred)
+flights$model2_pred[flights$model2_pred == 1] <- 0
+flights$model2_pred[flights$model2_pred == 2] <- 1
+
+X2 <- as.matrix(select(flights, origin_numeric, dest_numeric, arr_hour, dep_hour, distance))
+y2 <- flights$delayed
+
+head(X2)
+
+X2_train <- X2[flights$train_id == "train",]
+X2_valid <- X2[flights$train_id == "valid",]
+y2_train <- y2[flights$train_id == "train"]
+y2_valid <- as.numeric(y2[flights$train_id == "valid"])
+
+data_train <- xgb.DMatrix(data=X2_train, label=y2_train)
+data_valid <- xgb.DMatrix(data=X2_valid, label=y2_valid)
+
+watchlist <- list(train=data_train, valid=data_valid)
+
+model <- xgb.train(data=data_train, max_depth=6, eta=0.01, nthread=4, nrounds = 300, objective = "binary:logistic", watchlist=watchlist)
+
+predictions <- predict(model, newdata = X2_valid)
+
+model3_pred <- as.numeric(predictions>0.5)
+
+tapply(model3_pred == flights$delayed, flights$train_id, mean)
+
+```
+
+As a result, I use the KNN with origin_numeric and dest_numeric as my final model. 
+
+# Submission
+
+The code below assumes that you have added a prediction named
+`delayed_pred` to every row of the dataset.
+
+```{r}
+flights$delayed_pred <- model2_pred
+submit <- select(flights, obs_id, delayed_pred)
+write_csv(submit, "class10_submit.csv")
+```
+
+Now, upload this file (ends with ".Rmd"), the HTML output
+(ends with ".nb.html" or ".html"), and the csv file to
+GitHub.

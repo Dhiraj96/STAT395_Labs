@@ -1,0 +1,163 @@
+The format of this lab follows the same format as the previous
+ones. Your goal is to predict the value of the third column
+(which will be missing on the test set) using the techniques
+we have learned so far.
+
+One thing that you are not allowed to use are neural networks.
+We will see how to use this with images next week.
+
+# Set-up
+
+Read in the following libraries and to load the metadata about
+the class images:
+
+```{r}
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(viridis)
+library(stringi)
+library(jpeg)
+library(glmnet)
+library(keras)
+
+f17 <- read_csv("https://statsmaths.github.io/ml_data/f17_photos_2.csv")
+```
+
+To get the actual data for the images, you'll have to download the following
+files. The first is the smaller images, which you will certainly need for
+the lab. The second you are free to make use of for negative examples or
+to extract features from but there is no pressure to do so.
+
+- https://drive.google.com/open?id=0B6_9OUDRaPQsTDFUTXVZb0JnaTg
+- https://drive.google.com/open?id=0B6_9OUDRaPQsdzBiX1RmYUZwdDA
+
+Once these are downloaded, you'll have to run something like this:
+
+```{r}
+x32 <- read_rds("~/Desktop/f17_photos_2_x32.rds")
+```
+
+If, for example, the file sits on your Desktop and you have a mac. If you have
+trouble with any of this, please let me know as soon as possible.
+
+# Lab 17
+We start by collapsing the data into a 2-D array and decomposing our data into train and validation sets.
+```{r}
+X <- t(apply(x32, 1, cbind))
+y <- f17$class
+
+X_train <- X[f17$train_id == "train",]
+y_train <- y[f17$train_id == "train"]
+```
+
+Next, we start with running the glmnet model as described in class, looking at the coefficients for both min. and 1se. lambda values. We see that for the middle 1024 elements (1023-2048), only 2 of the variables are used. 
+```{r}
+
+model1 <- cv.glmnet(X_train, y_train, family="binomial", nfolds=5)
+
+beta <- coef(model1, s= c(model1$lambda.1se,model1$lambda.min))
+
+plot(model1)
+
+beta[beta[,1] != 0,,drop=FALSE]
+```
+
+Next, let us see how this model performs on our data. We see that using the min. lambda value gives us a slightly higher valid set and a much higher training set. 
+```{r}
+f17$predict_min <- predict(model1, newx = X, type="class", s = "lambda.min")
+predict_1se <- predict(model1, newx = X, type="class", s = "lambda.1se")
+
+tapply(f17$predict_min == y, f17$train_id, mean)
+tapply(predict_1se == y, f17$train_id, mean)
+```
+
+To get a better idea of where our classification fails, let us make a table of the results. We see that the model did a slightly worse job of classifying outside images, and that our dataset has more images inside. 
+```{r}
+table(y = f17$class, x = f17$predict_min)
+
+```
+
+Next, I attempt to use the data and build a neural network for classification. 
+```{r}
+X <- as.matrix(X)
+
+X_train <- X[f17$train_id == "train",]
+X_valid <- X[f17$train_id == "valid",]
+
+y_train <- to_categorical(y[f17$train_id == "train"], num_classes=2)
+y_valid <- to_categorical(y[f17$train_id == "valid"], num_classes=2)
+
+
+ model2 <- keras_model_sequential()
+ model2 %>%
+   layer_dense(units=100, input_shape = c(3072)) %>%
+   layer_activation(activation = "relu") %>%
+   layer_dense(units=50) %>%
+   layer_activation(activation = "relu") %>%
+   layer_dense(units=25) %>%
+   layer_activation(activation = "relu") %>%
+   layer_dense(units=2) %>%
+   layer_activation(activation = "softmax")
+model2
+
+```
+
+```{r}
+
+model2 %>% compile(loss='categorical_crossentropy',
+                   optimizer = optimizer_adagrad(lr=0.001),
+                   metrics = c('accuracy'))
+
+history <- model2 %>% fit(
+  X_train, y_train,
+  epochs = 10,
+  validation_data=list(X_valid, y_valid)
+)
+
+plot(history)
+
+
+```
+
+
+We see that the neural network is extremely overfit since it is able to accurately classify almost all the training data but just over 3/4ths of the validation data. Our validation accuracy is slightly improved however so I decided to opt for this model.
+
+Looking at the first table, we see that our training data was mostly accurate and that our model captured the outside pictures more effectively. The opposite is true for our validation data (with 42 missclassifications of outside for inside), which is the same issue we had with our elastic net model. 
+```{r}
+f17$predict_nn <- predict_classes(model2, x=X)
+tapply(f17$predict_nn == y, f17$train_id, mean)
+
+
+table(y = f17$class[f17$train_id == "train"], x = f17$predict_nn[f17$train_id == "train"])
+
+table(y = f17$class[f17$train_id == "valid"], x = f17$predict_nn[f17$train_id == "valid"])
+```
+
+Finally, I attempt to blend the two categorical predictions in a simple logistic function using only the validation subset to see if my prediction results are improved. We see that our validation accuracy is slightly improved. 
+```{r}
+model_blend <- glm(class ~ predict_nn + predict_min, data=f17, 
+                   subset = (train_id == "valid"))
+
+summary(model_blend)
+
+f17$outside_pred <- predict(model_blend, newdata=f17,type="response")
+f17$outside_pred <- as.numeric(f17$outside_pred > 0.5)
+
+
+tapply(f17$outside_pred == y, f17$train_id, mean)
+```
+
+# Submission
+
+The code below assumes that you have added a prediction named
+`outside_pred` to every row of the dataset.
+
+```{r}
+submit <- select(f17, obs_id, outside_pred)
+write_csv(submit, "class17_submit.csv")
+```
+
+Now, upload this file (ends with ".Rmd"), the HTML output
+(ends with ".nb.html" or ".html"), and the csv file to
+GitHub.

@@ -1,0 +1,107 @@
+The format of this lab follows the same format as the previous
+ones. Your goal is to predict the value of the third column
+(which will be missing on the test set) using the techniques
+we have learned so far.
+
+**One special rule this time: You are absolutely forbidden to
+create new variables by hand. If I find, for example, that you
+created a "flush" column or a column "max card" you'll get a zero
+for the lab.**
+
+# Set up
+
+Read in the following libraries and to load the crimes dataset:
+
+```{r}
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(viridis)
+library(glmnet)
+library(keras)
+
+poker <- read_csv("https://statsmaths.github.io/ml_data/poker_hands.csv")
+```
+
+Your assignment will be scored using RMSE.
+
+# Lab 12
+
+Let us start with first creating the matrices for our data set and partitioning them based on our valid and train data sets. 
+```{r}
+X <- model.matrix(~ . -1, data=poker[,4:13])
+y <- poker$quality
+
+X_train <- X[poker$train_id == "train",]
+X_valid <- X[poker$train_id == "valid",]
+
+y_train <- to_categorical(y[poker$train_id == "train"], num_classes = 10)
+y_valid <- to_categorical(y[poker$train_id == "valid"], num_classes = 10)
+
+head(X_train)
+
+```
+
+From the table below we see that our data set is significantly unbalanced since the majority of our data considers a much higher number of lower quality data. This may indicate that a dense neural network may be the most appropriate model for our data. 
+```{r}
+table(poker$train_id, poker$quality)
+
+```
+
+Next, we attempt to fit a neural network to the model. The reason why I believe this will be the most accurate model is because the network is notoriously good for finding complex interactions between predictor variables. In this case, determining why a flush is better than a straight or why having more of the same type of card in a hand is better than less. 
+```{r}
+model1 <- keras_model_sequential()
+model1 %>%
+  layer_dense(units = 40, input_shape = c(10)) %>%
+  layer_activation(activation = "relu") %>%
+  layer_dense(units = 30) %>%
+  layer_activation(activation = "relu") %>%
+  layer_dense(units = 20) %>%
+  layer_activation(activation = "relu") %>%
+  layer_dense(units = 10) %>%
+  layer_activation(activation = "softmax")
+model1
+  
+
+```
+
+I found that creating a more dense neural network led to a worse validation accuracy since the very dense networks typically restricted their predictions to mostly 0's, if not all. Therefore, after playing around with the number of neurons, I found the following to consistently have higher validation accuracies. 
+```{r}
+model1 %>% compile(loss = 'categorical_crossentropy',
+                  optimizer = optimizer_rmsprop(lr = 0.01),
+                  metrics = c('accuracy'))
+
+history <- model1 %>% fit(
+  X_train, y_train, 
+  epochs = 10,
+  validation_data = list(X_valid, y_valid),
+)
+
+plot(history)
+
+```
+
+
+Next, I save our predicted values and create a confusion matrix to see how well our network classified the different difficulties. Clearly we see that because of the imbalance in our data set, the neural network only predicts values that are 3 or below since there is such sparse data for the stronger hands. The RMSE is about 0.36 which seems reasonably good. 
+```{r}
+poker$quality_pred <- predict_classes(model1, x = X)
+table(y= poker$quality, y_pred = poker$quality_pred)
+
+sqrt(tapply((poker$quality - poker$quality_pred)^2, poker$train_id, mean))
+
+```
+
+# Submission
+
+The code below assumes that you have added a prediction named
+`quality_pred` to every row of the dataset.
+
+```{r}
+
+submit <- select(poker, obs_id, quality_pred)
+write_csv(submit, "class12_submit.csv")
+```
+
+Now, upload this file (ends with ".Rmd"), the HTML output
+(ends with ".nb.html" or ".html"), and the csv file to
+GitHub.

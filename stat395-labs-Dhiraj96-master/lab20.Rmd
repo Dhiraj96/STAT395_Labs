@@ -1,0 +1,124 @@
+The format of this lab follows the same format as the previous
+ones. Your goal is to predict the value of the third column
+(which will be missing on the test set) using the techniques
+we have learned so far.
+
+# Set-up
+
+Read in the following libraries and to load the metadata:
+
+```{r}
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(viridis)
+library(stringi)
+library(keras)
+
+emnist <- read_csv("https://statsmaths.github.io/ml_data/emnist_6.csv")
+```
+
+To get the actual data for the images, you'll have to download the following
+file.
+
+- https://drive.google.com/file/d/0B6_9OUDRaPQsX0tlTmlwRVpNR00
+
+Once these are downloaded, you'll have to run something like this:
+
+```{r}
+x64 <- read_rds("~/Desktop/emnist_6_x28.rds")
+```
+
+If, for example, the file sits on your Desktop and you have a Mac. If you have
+trouble with any of this, please let me know as soon as possible.
+
+
+# Lab 20
+
+Let us start by reading in the data. 
+```{r}
+X <- x64
+X_train <- X[emnist$train_id == "train",,,,drop = FALSE]
+
+y <- emnist$class
+y_train <- to_categorical(y[emnist$train_id == "train"], num_classes = 6)
+
+y_label <- emnist$class_name
+
+```
+
+Let us dive into the convolutional neural network for the model. We experimented with 
+
+```{r}
+model <- keras_model_sequential()
+model %>%
+  
+    layer_conv_2d(filters = 32, kernel_size = c(2,2), input_shape =   c(28,28,1), padding = "same") %>%
+    layer_activation(activation = "relu") %>%
+    layer_conv_2d(filters = 32, kernel_size = c(2,2), padding = "same") %>%
+    layer_activation(activation = "relu") %>%
+    layer_max_pooling_2d(pool_size = c(2,2)) %>% 
+    layer_dropout(rate = 0.2) %>%
+  
+    layer_conv_2d(filters = 32, kernel_size = c(2,2), padding = "same") %>%
+    layer_activation(activation = "relu") %>%
+    layer_conv_2d(filters = 32, kernel_size = c(2,2), padding = "same") %>%
+    layer_activation(activation = "relu") %>%
+    layer_max_pooling_2d(pool_size = c(2,2)) %>%
+    layer_dropout(rate = 0.25) %>%
+  
+    layer_flatten() %>%
+    layer_dense(units = 64) %>%
+    layer_activation(activation = "relu") %>%
+    layer_dropout(rate = 0.25) %>%
+    layer_dense(units = 64) %>%
+    layer_activation(activation = "relu") %>%
+    layer_dropout(rate = 0.25) %>%
+    layer_dense(units = 6) %>%
+    layer_activation(activation = "softmax")
+
+model %>% compile(loss = 'categorical_crossentropy',
+                  optimizer = optimizer_rmsprop(),
+                  metrics = c('accuracy'))
+  
+model
+ 
+history <- model %>%
+  fit(X_train, y_train, epochs = 10, validation_split = 0.2, batch_size = 1024)
+
+plot(history)
+
+```
+
+
+Next, lets make class predictions and look at what letters were difficult to predict. We see that e and a are hard to distinguish, d and i are hard to distinguish and b and l are hard to distinguish. 
+```{r}
+y_pred <- predict_classes(model, X)
+
+tapply(y == y_pred, emnist$train_id, mean)
+
+table(y_label[emnist$train_id == "train"],
+      letters[y_pred[emnist$train_id == "train"] + 1])
+
+
+```
+
+
+
+
+
+
+# Submission
+
+The code below assumes that you have added a prediction named
+`class_pred` to every row of the dataset.
+
+```{r}
+emnist$class_pred <- y_pred
+submit <- select(emnist, obs_id, class_pred)
+write_csv(submit, "class20_submit.csv")
+```
+
+Now, upload this file (ends with ".Rmd"), the HTML output
+(ends with ".nb.html" or ".html"), and the csv file to
+GitHub.

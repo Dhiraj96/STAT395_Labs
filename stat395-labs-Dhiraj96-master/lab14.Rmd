@@ -1,0 +1,107 @@
+The format of this lab follows the same format as the previous
+ones. Your goal is to predict the value of the third column
+(which will be missing on the test set) using the techniques
+we have learned so far.
+
+# Set up
+
+You may need the tokenizers and smodels libraries if you don't
+already have them:
+
+Read in the following libraries and to load the amazon products:
+
+```{r}
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(viridis)
+library(stringi)
+library(tokenizers)
+library(smodels)
+library(glmnet)
+
+president <- read_csv("https://statsmaths.github.io/ml_data/presidents_5.csv")
+```
+Your assignment will be scored using accuracy. Make sure to submit class
+labels of either 1, 2, 3, 4 or 5.
+
+# Lab 14
+
+
+I start by looking at the balance/imbalance in our dataset to get a better idea of the problem at hand. Looking at the data, we see that the highest frequency presidents in our train and valid set are very different order. 
+```{r}
+table(president$train_id, president$class_name)
+
+```
+
+
+Next, I tokenize the words into 1,2 or 3 word combinations (trigrams) and shingles, setting the frequency of the occurences to be between 1% and 90% of the speeches. 
+Including the shingles improved the validation accuracy of the glmnet so I opted for it. 
+```{r}
+
+
+token_list <- tokenize_ngrams(president$text, n = 3, n_min=1)
+token_list_2 <- tokenize_character_shingles(president$text, n_min=1, n=3, strip_non_alphanum = TRUE)
+
+token_df_1 <- term_list_to_df(token_list)
+token_df_2 <- term_list_to_df(token_list_2)
+
+
+X1 <- term_df_to_matrix(token_df_1, min_df = 0.01, max_df = 0.90,
+                       scale = TRUE)
+X2 <- term_df_to_matrix(token_df_2, min_df = 0.01, max_df = 0.90,
+                       scale = TRUE)
+
+X <- cbind(X1, X2)
+
+y <- president$class
+X_train <- X[president$train_id == "train",]
+X_valid <- X[president$train_id == "valid",]
+y_train <- y[president$train_id == "train"]
+y_valid <- y[president$train_id == "valid"]
+
+
+```
+
+Next, I fit a glmnet to the data collected. We see that the min and 1se errors are very slightly different which may mean that a much less complex model may be optimal for our final predictions. 
+```{r}
+
+model1 <- cv.glmnet(X_train,y_train, alpha=0.9, nfolds=5, family="multinomial")
+plot(model1)
+
+coeficients <- coef(model1, s = c(model1$lambda.min, model1$lambda.1se))
+
+```
+
+It seems as though the min lambda model gives us the higher validation set accuracy of about 46% therefore we opt for the min lambda value for our glmnet model. 
+```{r}
+model1_pred_1se <- predict(model1, newx=X, s = "lambda.1se", type="class")
+model1_pred_min <- predict(model1, newx=X, s = "lambda.min", type="class")
+
+tapply(model1_pred_1se == president$class, president$train_id, mean)
+tapply(model1_pred_min == president$class, president$train_id, mean)
+
+president$class_pred <- model1_pred_min
+
+```
+
+Next, we look at some diagnostics of our predictions. We see that the model did a fairly good job of predictin categories 1,3,5 (presidents Eisenhower,Johnson and Reagan). But misclassifies many 2 and 4 (Truman, Nixon). I also notice that the data has many NA values (some of which the model predicted correctly). This makes sense especially when considering that presidents 2,4 are the 2 most frequent in our validation set but 2 of the least frequent in our training set. 
+```{r}
+table(y=president$class, x = president$class_pred)
+
+```
+
+
+# Submission
+
+The code below assumes that you have added a prediction named
+`class_pred` to every row of the dataset.
+
+```{r}
+submit <- select(president, obs_id, class_pred)
+write_csv(submit, "class14_submit.csv")
+```
+
+Now, upload this file (ends with ".Rmd"), the HTML output
+(ends with ".nb.html" or ".html"), and the csv file to
+GitHub.

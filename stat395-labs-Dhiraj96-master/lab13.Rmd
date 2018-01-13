@@ -1,0 +1,218 @@
+The format of this lab follows the same format as the previous
+ones. Your goal is to predict the value of the third column
+(which will be missing on the test set) using the techniques
+we have learned so far.
+
+# Set up
+
+You may need the stringi library if you don't already have it:
+
+Read in the following libraries and to load the amazon products:
+
+```{r}
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(viridis)
+library(stringi)
+library(nnet)
+library(glmnet)
+library(xgboost)
+
+amazon <- read_csv("https://statsmaths.github.io/ml_data/amazon_product_class.csv")
+```
+
+Your assignment will be scored using accuracy. Make sure to submit class
+labels of either 1, 2, or 3.
+
+# Lab 13
+
+## Part 1: This first lab looks at fitting various simple additive multinom. models from the nnet packaged. 
+Lets start by looking at some data to see if there are any common features within any of our prediction classes.
+  1. First, we count the length of the text set
+  2. Next, we create another variable with the same text but in lower case (for word       detection)
+  3. I start with a few words I think will be good in determining food related categories.
+  
+```{r}
+amazon$count_letters <- stri_length(amazon$text)
+amazon$to_lower_case <- stri_trans_tolower(amazon$text)
+
+amazon$count_food_tast <- stri_count(amazon$to_lower_case, fixed= "tast")
+amazon$count_food_flavor <- stri_count(amazon$to_lower_case, fixed= "flavor")
+amazon$count_food_eat <- stri_count(amazon$to_lower_case, fixed= " eat ")
+amazon$count_food_health <- stri_count(amazon$to_lower_case, fixed= "health")
+
+```
+
+
+To see if these can accurately identify the food categories from the other two, let us run an intermediate multinom function prediction and analyze the confusion matrix. Surprisingly, it does a better job of predicting movies and TV vs. the food category. 
+```{r}
+model_food <- multinom(category ~ count_food_tast + count_food_flavor + count_food_health + count_food_eat, data = amazon)
+
+
+category_pred_1 <- predict(model_food, newdata = amazon)
+tapply(category_pred_1 == amazon$category, amazon$train_id, mean)
+table(y = amazon$category, y_pred = category_pred_1)
+
+```
+
+Next, let us look at some features that may be key in identifying movies/tv and books. I first create a histogram comparing frequency of each category in our train and valid sets, then comparing word length across these categories. We see that the data set is relatively balanced. Also, we see that typically movie/tv and book reviews tend to be longer than food related reviews.
+```{r}
+table(amazon$train_id, amazon$category)
+qplot(amazon$count_letters, amazon$category) + geom_point(position = "jitter")
+
+```
+
+Like in class, we can also use the read word for prediction, and add this as well as length of review to our multinom model. 
+```{r}
+amazon$count_read <- stri_count(amazon$to_lower_case, fixed= " read ")
+amazon$count_book <- stri_count(amazon$to_lower_case, fixed= " book ")
+amazon$count_author <- stri_count(amazon$to_lower_case, fixed= " author ")
+
+amazon$count_movie <- stri_count(amazon$to_lower_case, fixed= " movie")
+amazon$count_dvd <- stri_count(amazon$to_lower_case, fixed= "dvd")
+
+```
+
+We try combining these additional features in our original model to see how well it does. We see that we do a much better job predicting the category 1, but we still have issues in falsely predicting 3rd category for 1st category and 3 category for second category. Therefore, I suspect we should add 1-2 more variables that are good at classifying movies and TV from books. Things to note:
+  1. Adding letters slightly improved our accuracy, therefore I decided not to include it in our model. 
+  2. After adding a dvd word count, I found that i had much less mis-classification of category 1 and category 2 for category 3 but a large increase in the number of category 3 misclassified for category 2.
+```{r}
+model_food <- multinom(category ~ count_food_tast + count_food_flavor + count_food_health + count_food_eat + count_read + count_book + count_author + count_movie + count_dvd, data = amazon)
+
+category_pred_2 <- predict(model_food, newdata = amazon)
+tapply(category_pred_2 == amazon$category, amazon$train_id, mean)
+table(y = amazon$category, y_pred = category_pred_2)
+
+```
+
+## Part 2: Next, I attempt a different approach using a glmnet for the features I have already extracted.
+
+Let us start by running glmnet and seeing the resulting coefficients for that model. It seems as though removing all the food related coefficients seems to only slightly increase our MSE, therefore let us compare the results of the valid accuracy of both these lambda values. We see that this model also gives us very similar results to our last model, with the lambda min having a higher validation RMSE. 
+
+```{r}
+X <- model.matrix(~ . - 1, data= amazon[,7:15])
+y <- amazon$category
+
+X_train <- X[amazon$train_id == "train",]
+X_valid <- X[amazon$train_id == "valid",]
+y_train <- y[amazon$train_id == "train"]
+y_valid <- y[amazon$train_id == "valid"]
+
+
+model_glmnet <- cv.glmnet(X_train, y_train, alpha=0.9, family="multinomial")
+coef(model_glmnet, s = c(model_glmnet$lambda.min, model_glmnet$lambda.1se))
+plot(model_glmnet)
+
+
+model_glmnet_pred_1se <- predict(model_glmnet, newx= X, s = "lambda.1se", type="class")
+model_glmnet_pred_min <- predict(model_glmnet, newx= X, s = "lambda.min", type="class")
+
+
+tapply(model_glmnet_pred_1se == amazon$category, amazon$train_id, mean)
+tapply(model_glmnet_pred_min == amazon$category, amazon$train_id, mean)
+
+
+```
+## Part 3: Finally, I use the xgb train model to fit a one vs. many model with the features that I have selected. 
+
+The first thing to do is create new dummy variable columns for categories 1,2,3. Then we run 3 models predicting each respective category. We then use these 3 predictions in our multinom package as we used above in part 1. 
+```{r}
+
+amazon$cat_1 <- as.numeric(amazon$category == 1)
+amazon$cat_2 <- as.numeric(amazon$category == 2)
+amazon$cat_3 <- as.numeric(amazon$category == 3)
+
+y_cat1 <- amazon$cat_1
+y_cat1_train <- y_cat1[amazon$train_id == "train"]
+y_cat1_valid <- y_cat1[amazon$train_id == "valid"]
+
+y_cat2 <- amazon$cat_2
+y_cat2_train <- y_cat2[amazon$train_id == "train"]
+y_cat2_valid <- y_cat2[amazon$train_id == "valid"]
+
+y_cat3 <- amazon$cat_3
+y_cat3_train <- y_cat3[amazon$train_id == "train"]
+y_cat3_valid <- y_cat3[amazon$train_id == "valid"]
+
+
+
+
+data_train_cat1 <- xgb.DMatrix(data=X_train, label = y_cat1_train)
+data_valid_cat1 <- xgb.DMatrix(data=X_valid, label = y_cat1_valid)
+watchlist_cat1 <- list(train=data_train_cat1, valid=data_valid_cat1)
+
+data_train_cat2 <- xgb.DMatrix(data=X_train, label = y_cat2_train)
+data_valid_cat2 <- xgb.DMatrix(data=X_valid, label = y_cat2_valid)
+watchlist_cat2 <- list(train=data_train_cat2, valid=data_valid_cat2)
+
+data_train_cat3 <- xgb.DMatrix(data=X_train, label = y_cat3_train)
+data_valid_cat3 <- xgb.DMatrix(data=X_valid, label = y_cat3_valid)
+watchlist_cat3 <- list(train=data_train_cat3, valid=data_valid_cat3)
+
+```
+
+We then fit 3 xgb.train models, for each category prediction. For class 1, we were able to achieve a 91% class prediction, for class 2, an 88% class prediction and for class 3 an 88% class prediction. Based on our importance matrix, we also note that the health, eat and author keywords were least important across all 3 models. 
+```{r}
+model_cat_1 <- xgb.train(data=data_train_cat1, max_depth = 4, eta = 0.01, nthread=4, nrounds = 1000, objective = "binary:logistic", watchlist=watchlist_cat1, print_every_n = 100)
+
+model_cat_1_pred <- predict(model_cat_1, newdata= X)
+model_cat_1_pred <- as.numeric(model_cat_1_pred > 0.5)
+tapply(model_cat_1_pred == y_cat1, amazon$train_id, mean)
+
+importance_matrix_cat_1 <- xgb.importance(model = model_cat_1)
+importance_matrix_cat_1[,1] <- colnames(X)[as.numeric(importance_matrix_cat_1[[1]])+1]
+importance_matrix_cat_1
+
+
+
+model_cat_2 <- xgb.train(data=data_train_cat2, max_depth = 4, eta = 0.01, nthread=4, nrounds = 1000, objective = "binary:logistic", watchlist=watchlist_cat2, print_every_n = 100)
+
+model_cat_2_pred <- predict(model_cat_2, newdata= X)
+model_cat_2_pred <- as.numeric(model_cat_2_pred > 0.5)
+tapply(model_cat_2_pred == y_cat2, amazon$train_id, mean)
+
+importance_matrix_cat_2 <- xgb.importance(model = model_cat_2)
+importance_matrix_cat_2[,1] <- colnames(X)[as.numeric(importance_matrix_cat_2[[1]])+1]
+importance_matrix_cat_2
+
+
+
+model_cat_3 <- xgb.train(data=data_train_cat3, max_depth = 4, eta = 0.01, nthread=4, nrounds = 1000, objective = "binary:logistic", watchlist=watchlist_cat3, print_every_n = 100)
+
+model_cat_3_pred <- predict(model_cat_3, newdata= X)
+model_cat_3_pred <- as.numeric(model_cat_3_pred > 0.5)
+tapply(model_cat_3_pred == y_cat3, amazon$train_id, mean)
+
+importance_matrix_cat_3 <- xgb.importance(model = model_cat_3)
+importance_matrix_cat_3[,1] <- colnames(X)[as.numeric(importance_matrix_cat_3[[1]])+1]
+importance_matrix_cat_3
+
+
+
+```
+
+
+Finally we blend the one vs. many models into a multinom and see if that improves our validation accuracy. We also look at the confusion matrix to see if there are certain categories we may be underpredicting. We see that our validation accuracy only improved so slightly. It seems as though to get better performance, we may need to add additional features. 
+```{r}
+model_onevsmany <- multinom(category ~ model_cat_1_pred + model_cat_2_pred + model_cat_3_pred, data = amazon)
+
+model_onevsmany_pred <- predict(model_onevsmany, newdata = amazon)
+tapply(model_onevsmany_pred == amazon$category, amazon$train_id, mean)
+table(y = amazon$category, y_pred = model_onevsmany_pred)
+
+amazon$category_pred <- model_onevsmany_pred
+```
+# Submission
+
+The code below assumes that you have added a prediction named
+`category_pred` to every row of the dataset.
+
+```{r}
+submit <- select(amazon, obs_id, category_pred)
+write_csv(submit, "class13_submit.csv")
+```
+
+Now, upload this file (ends with ".Rmd"), the HTML output
+(ends with ".nb.html" or ".html"), and the csv file to
+GitHub.

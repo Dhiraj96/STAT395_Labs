@@ -1,0 +1,75 @@
+The format of this lab follows the same format as the previous
+ones. Your goal is to predict the value of the third column
+(which will be missing on the test set) using the techniques
+we have learned so far.
+
+# Set up
+
+Read in the following libraries and to load the nba dataset:
+
+```{r}
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(viridis)
+library(e1071)
+library(gam)
+
+nba <- read_csv("https://statsmaths.github.io/ml_data/nba_shots.csv")
+```
+
+Make sure that your predictions are either `0` or `1`. Here are
+some packages you might need:
+
+```{r}
+if (!require("e1071")) {
+  install.packages("e1071")
+}
+```
+
+# Lab 07
+
+```{r}
+#First, let us compute a model that include all the variables in an additive linear model. I decided to include a poly term for the shot clock, shot distance in an attempt to capture any non-linearity in the relationship between the variables. I also did the same for the closest defender distance and defender height. After playing around with the model parameters slightly, I found this to have the highest valid and train classification rate. 
+
+model1 <- glm(fgm ~ poly(shot_clock, shot_dist, degree = 3) + touch_time + poly(close_def_dist ,defender_height, degree = 2) + period, data=nba, subset = train_id == "train", family = binomial(link="logit"))
+
+model1_pred <- predict(model1, newdata = nba, type = "response")
+model1_pred <- as.numeric(model1_pred > 0.5)
+
+tapply(model1_pred == nba$fgm, nba$train_id, mean)
+
+```
+
+```{r}
+#Next, I attempted to fit a similar model using SVM and the polynomial kernel to take into account the potential non-linear affects between variables.
+
+y <- nba$fgm
+X <- as.matrix(select(nba, shot_clock, shot_dist, touch_time, close_def_dist, defender_height ))
+
+X_train <- X[nba$train_id == "train", ]
+y_train <- y[nba$train_id == "train"]
+
+#we see that using a polynomial kernel slightly improves our training set as well as our validation set. As a result, I have decided to go for model2. 
+
+model2 <- svm(X_train, factor(y_train), kernel = "polynomial")
+model2_pred <- as.numeric(as.character(predict(model2, newdata = X, type = "response")))
+summary(model2)
+tapply(model2_pred == nba$fgm, nba$train_id, mean)
+```
+
+
+# Submission
+
+The code below assumes that you have added a prediction named
+`fgm_pred` to every row of the dataset.
+
+```{r}
+nba$fgm_pred <- model2_pred
+submit <- select(nba, obs_id, fgm_pred)
+write_csv(submit, "class07_submit.csv")
+```
+
+Now, upload this file (ends with ".Rmd"), the HTML output
+(ends with ".nb.html" or ".html"), and the csv file to
+GitHub.

@@ -1,0 +1,146 @@
+## Instructions
+
+The format for this lab is similar to the last one.
+I have a section here which loads in various
+libraries (if some are new, there will also be code to install
+them) and then loads a dataset of interest. Your goal is to
+predict the value of the third column (which will be missing
+on the test set) using the techniques we have learned so far.
+In this case, please restrict yourself to linear regressions,
+though you may now use multivariate models.
+
+The lab should be written as short code snippets with surrounding
+text. The text should be in full sentences and should fully describe
+what and why you are running the code you are running.  When there
+are results, you should also give a sentence or two describing them.
+
+Make sure to include at a minimum several plots and justify why
+are picked the final model you are using.
+
+You may not share code with other students prior to the submission
+of each lab. However, discussing the labs amongst other students
+is allowed. Also, copying and pasting my code from class or
+prior submissions you made is **not** considered plagiarism and
+is in fact highly encouraged. With permission, I may occasionally
+post student-solutions to past labs. These are also fair game
+for copying code from (though please do not excessively copy the
+expository text). If in doubt, please ask me before submitting
+results.
+
+## Set up
+
+Your first step should be to read in the following libraries:
+
+```{r}
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(viridis)
+```
+
+And to load the wine dataset:
+
+```{r}
+wine <- read_csv("https://statsmaths.github.io/ml_data/wine.csv")
+```
+
+The dataset gives characteristics of various types of wine.
+Your goal is to use these to estimate the quality of the wine.
+
+Your code and text should go in the section below (feel free to create
+sub-sections with the `###` command at the start of line, though please
+note that this is not required):
+
+## Lab 03
+
+```{r}
+#We can first start with looking at how wine quality is distributed
+attach(wine)
+qplot(quality, data=wine)
+#The range of scores is 3 to 9, with 6 being the most common, but with a large proportion of results below 6 (slight negatively skewed)
+
+```
+```{r}
+#Before plotting more univariate series, it will be easier to create a correlation matrix with the continuous variables to determine what variables are highly correlated with wine
+
+Corr_table <- data.frame(wine)
+Corr_table$obs_id <- NULL
+Corr_table$train_id <- NULL
+Corr_table$red <- NULL
+
+Corr_table <- na.omit(Corr_table)
+cor(Corr_table)
+
+#In the correlation table, we see that the highest correlation between quality and another feature is alcohol (which may indicate we want to include this in our multivariate regression). Another thing to note is the negative correlation of quality and density. 
+
+```
+
+```{r}
+#Now we can move on to plot the various univariate features: I have chosen to only include plots with some interesting features. Both fixed and volatile acidity seem to be very skewed and alcohol less so. The majority of values in density seem to be in a very tight range, although a few outliers could heavily influence our data. 
+
+qplot(fixed_acidity, data=wine)
+qplot(volatile_acidity, data=wine)
+qplot(density, data=wine)
+qplot(alcohol, data=wine)
+
+
+```
+
+```{r}
+#Next, we can construct some bivariate plots of the data vs. quality to see how each of these features vary with the response variable. We can use the pairs function to simultaneously graph all of these predictors on one graph. I have chosen to exclude those that exhibit little to no variation with changing quality (indicating them to not be very good predictors)
+  #I have chosen to exclude volatilities, citric_acid and residual sugar mainly due to them having outlier observations,       potentially severly skewing our estimators as well as being poor predictors of quality based on correlation. 
+
+
+pairs(~quality+density+alcohol, data=wine)
+```
+
+```{r}
+#Now we can use a stepwise regression to determine what features it will include/not include in our model. We can begin with a relatively large model (almost kitchen sink) based on our correlations.
+
+  #The model shows that volatile acidity, density and alcohol should remain included in our model to minimize the AIC as they all seem statistically significant in predicting quality. 
+
+model1 <- step(lm(quality~volatile_acidity+chlorides+density+alcohol))
+summary(model1)
+model1_predict <- predict(model1, newdata=wine)
+```
+
+```{r}
+#We can now compare this model with a general multivariate regression model based just on density and alcohol
+
+model2 <- lm(quality~density+alcohol)
+summary(model2)
+model2_predict <- predict(model2, newdata=wine)
+```
+
+```{r}
+#Now let us compute the root mean squared error from each of our models to see which is lower
+
+#For model 1 We have:
+sqrt(mean((wine$quality - model1_predict)^2, na.rm=TRUE))
+
+#For model 2 We have:
+sqrt(mean((wine$quality - model2_predict)^2, na.rm=TRUE))
+
+#I have also decided to add another model which has all the variables placed in it below
+model3 <- lm(quality~fixed_acidity+volatile_acidity+chlorides+density+alcohol+citric_acid+residual_sugar+ph+sulphates+red)
+model3_predict <- predict(model3, newdata=wine)
+sqrt(mean((wine$quality - model3_predict)^2, na.rm=TRUE))
+
+#Based on these observations, it seems as though our third model with all the features produces the lowers RMSE. But I hypothesize that adding to many variables may expose our model to overfitting on the training data (i.e. data mining bias), leading to less accurate predictions of our test or out-of-sample data set. Hence, I have chosen model1 as my final quality predictions as there is very little improvement in the RMSE (just over 0.01) for all the extra variables introduced.
+wine$quality_pred <- model1_predict
+```
+
+
+
+## Submission
+
+The code below assumes that you have adding a prediction named
+`quality_pred` to every row of the `wine` dataset.
+
+```{r}
+submit <- select(wine, obs_id, quality_pred)
+write_csv(submit, "class03_submit.csv")
+```
+
+Now, upload this file (ends with ".Rmd"), the HTML output
+(ends with ".nb.html" or ".html"), and the csv file to GitHub.

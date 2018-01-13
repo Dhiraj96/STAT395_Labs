@@ -1,0 +1,94 @@
+The format of this lab follows the same format as the previous
+ones. Your goal is to predict the value of the third column
+(which will be missing on the test set) using the techniques
+we have learned so far.
+
+# Set up
+
+Read in the following libraries and to load the crimes dataset:
+
+```{r}
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(viridis)
+library(nnet)
+library(FNN)
+
+crimes <- read_csv("https://statsmaths.github.io/ml_data/chi_crimes_5.csv")
+```
+
+The names of the crimes are, in order:
+
+```{r}
+c("criminal_damage", "narcotics", "prostitution", "robbery", "theft")
+```
+
+Make sure that your predictions are either `1`, `2`, `3`, `4` or `5`.
+
+# Lab 08
+```{r}
+#The first thing I will do is create a model matrix with the variables that may give some predictive power. I have decided to remove the location since our KNN will not work for categorial variables. I also decided to remove the day, month and hour variables since they reduced the overall train and valid set classification rates. 
+
+X <- as.matrix(select(crimes, longitude, latitude))
+y <- crimes$crime_type
+X_train <- X[crimes$train_id == "train",]
+y_train <- y[crimes$train_id == "train"]
+
+#Next we run a preliminary KNN algorithm on our data, changing our k parameter to for tuning. To do this, I first started off with plugging in a few random values between 0 and 100 to gauge how smaller values of k affected the validation rate. I found that k values above 40 made the valid classification rate worse and worse. I looped over values from 10 to 40 and found that a k of 13 maximized the validation rate. 
+
+#tuning_function <- function(){
+  
+ # result_final <- 0.33
+ # i_final <- 0
+  
+ # for(i in 10:40){
+ #   crimes$y_pred <- knn(train = X_train, test = X, cl = y_train, k = i)
+  #  result <- tapply(crimes$y_pred == crimes$crime_type, crimes$train_id, mean)[3]
+  #  if(result > result_final){
+   #   result_final <- result
+   #   i_final <- i
+   # }
+  #}
+  
+#  return(i_final)
+#}
+
+
+#result <- tuning_function()
+#result
+crimes$y_pred <- knn(train = X_train, test = X, cl = y_train, k = 13)
+tapply(crimes$y_pred == crimes$crime_type, crimes$train_id, mean)
+
+
+
+```
+
+
+```{r}
+#Next I try to add add the hour and month factors to the model. Our training and validation set were both higher after this change. 
+model2 <- multinom(crime_type ~ crimes$y_pred + factor(year) + factor(hour) + factor(month) , data = crimes, subset = train_id == "train")
+
+model2_pred <- predict(model2, newdata = crimes)
+tapply(model2_pred == crimes$crime_type, crimes$train_id, mean)
+
+table(y = crimes$crime_type, y_pred = model2_pred)
+
+crimes$crime_type_pred <- model2_pred
+```
+
+
+
+# Submission
+
+The code below assumes that you have added a prediction named
+`crime_type_pred` to every row of the dataset.
+
+```{r}
+submit <- select(crimes, obs_id, crime_type_pred)
+write_csv(submit, "class08_submit.csv")
+```
+
+Now, upload this file (ends with ".Rmd"), the HTML output
+(ends with ".nb.html" or ".html"), and the csv file to
+GitHub.

@@ -1,0 +1,145 @@
+The format of this lab follows the same format as the previous
+ones. Your goal is to predict the value of the third column
+(which will be missing on the test set) using the techniques
+we have learned so far.
+
+# Set up
+
+Read in the following libraries and to load the crimes dataset:
+
+```{r}
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(viridis)
+library(glmnet)
+library(ggmap)
+library(GGally)
+library(FNN)
+library(gam)
+
+tract <- read_csv("https://statsmaths.github.io/ml_data/tract_median_income.csv")
+```
+
+This lab will be scored using RMSE.
+
+# Lab 09
+
+To start let us do a few plots to help us better picture what we are trying to predict as well as the data subets
+
+```{r}
+qmplot(lon, lat, data = tract,
+      color = tract$train_id, size = I(0.5)) 
+```
+
+The plot of income quartiles seem to be a good predictor of median incomes. Also, the quartiles are very highly correlated which may indicate we only need one or a few of them to use as a predictor, similar to the age variables (although they do not exhibit as strong correlations across each other as income quartiles)
+```{r}
+
+qplot(income_q1, median_income, color = cbsa_type, data=tract)
+income_frame <- data.frame(tract$income_q1,tract$income_q2,tract$income_q3,tract$income_q4,tract$income_p95)
+ggpairs(income_frame)
+
+qplot(age_15_18, median_income, color = cbsa_type, data=tract)
+age_frame <- data.frame(tract$age_00_02,tract$age_03_04,tract$age_05_05,tract$age_06_08,tract$age_09_11,tract$age_12_14,tract$age_15_18)
+ggpairs(age_frame)
+
+
+```
+Next, I did a few exploratory graphs of the various variables but only kept those that seemed to have some sort of effect (or potential effect) on median income.
+  -We see that as avg. duration is farther from zero, the house values tend to fall.
+  -Also, we see that car_alone and public_transit seem to be good predictors of median income
+  -Healthcare, especially private healthcare also seems to be significant in predicting median income
+  -Housing costs seem to have a direct correlation to median income as well. As does gini, the measure of inequality
+```{r}
+qplot(avg_duration, median_income, data=tract) 
+
+qplot(car_alone, median_income, data=tract) 
+qplot(public_transit, median_income, data=tract)
+
+qplot(healthcare_private, median_income, data=tract)
+
+qplot(housing_costs, median_income, data=tract)
+
+qplot(median_income, gini, data=tract)
+
+```
+
+
+Next, I decide to include many of the variables identified above in an elastic net and tune the parameter to determine what variables I may want to include in my final model. After cycling through various values of lambda up to 50, I found that only 3 variables came out with significant variables. 
+```{r}
+X1 <- as.matrix(tract[,10:70])
+y1 <- tract$median_income
+X_train <- X1[tract$train_id == "train",]
+y_train <- y1[tract$train_id == "train"]
+
+model <- cv.glmnet(X_train, y_train, alpha = 0.9)
+model$lambda
+
+coef(model, s = model$lambda[50])
+plot(model)
+
+model2_pred <- predict.cv.glmnet(model, newx=X1, s="lambda.1se")
+sqrt(tapply((tract$median_income - model2_pred)^2,
+            tract$train_id, mean))
+```
+
+
+Next, let us see how well we can capture the lon. and lat. variables using a knn.reg function. We find that the model seems to do a relatively good job capturing the variation in incomes. Below is also code for a function that tunes the k value for our knn reg. It makes sense tune for low values of k since housing values can significant vary from one (lat,lon) combination to another. We find that a value of 5 leads to the lowest validation set RMSE so we use that for our model. 
+```{r}
+X <- as.matrix(select(tract, lon, lat))
+y <- as.matrix(tract$median_income)
+X_train <- X[tract$train_id == "train",]
+y_train <- y[tract$train_id == "train"]
+
+tuning_function <- function(){
+  
+ result_final <- 30000
+ i_final <- 1
+  
+ for(i in 1:30){
+    mod <- knn.reg(train = X_train, test = X, y = y_train, k = i)
+    mod_pred <- mod$pred
+    result <- sqrt(tapply((tract$median_income - mod_pred)^2, tract$train_id, mean))[3]
+    if(result < result_final){
+      result_final <- result
+      i_final <- i
+    }
+  }
+  
+  return(i_final)
+}
+
+result <- tuning_function()
+result
+
+model1 <- knn.reg(train = X_train, test = X, y = y_train, k = result)
+model1_pred <- model1$pred
+sqrt(tapply((tract$median_income - model1_pred)^2,
+            tract$train_id, mean))
+```
+
+Finally, let us try combining these two in a gam function to evaluate whether it improves our RMSE. I also added a few more variables that very slightly reduced the RMSE of my model but make intuitive sense to include. This will be my final model.
+```{r}
+
+model3 <- gam(median_income ~ s(model1_pred) + s(model2_pred) + s(gini)+ s(housing_above_1_million) + s(healthcare_private), subset = train_id == "train", data=tract)
+model3_pred <- predict(model3, newdata = tract)
+sqrt(tapply((tract$median_income - model3_pred)^2,
+            tract$train_id, mean))
+
+```
+
+
+# Submission
+
+The code below assumes that you have added a prediction named
+`median_income_pred` to every row of the dataset.
+
+```{r}
+tract$median_income_pred <- model3_pred
+submit <- select(tract, obs_id, median_income_pred)
+write_csv(submit, "class09_submit.csv")
+```
+
+Now, upload this file (ends with ".Rmd"), the HTML output
+(ends with ".nb.html" or ".html"), and the csv file to
+GitHub.
