@@ -1,5 +1,5 @@
 # My Projects
-Here you will find folders of all my completed coding related projects. Currently there is just one repo that contains the assignments/projects I worked on during my Statistical Learning Class at the University of Richmond. I am also currently working on various trading related statistical studies that will be posted up soon. 
+Here you will find folders of all my completed coding related projects. Currently there is just one repo that contains the assignments/projects I worked on during my Statistical Learning Class at the University of Richmond. I am also currently working on various trading related statistical studies that will be posted up in due time. 
 
 
 ## Stat395_Labs
